@@ -1022,7 +1022,7 @@ class DifixPipeline(
 
         # 5. Prepare latent variables
         latents = self.prepare_latents(
-            image,
+            torch.cat([image, ref_image], dim=0) if ref_image is not None else image,
             batch_size,
             num_images_per_prompt,
             prompt_embeds.dtype,
@@ -1031,15 +1031,6 @@ class DifixPipeline(
         )
 
         if ref_image is not None:
-            ref_latents = self.prepare_latents(
-                ref_image,
-                batch_size,
-                num_images_per_prompt,
-                prompt_embeds.dtype,
-                device,
-                generator,
-            )
-            latents = torch.cat([latents, ref_latents], dim=0)
             prompt_embeds = torch.cat([prompt_embeds, prompt_embeds], dim=0)
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
@@ -1127,6 +1118,8 @@ class DifixPipeline(
         else:
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
 
+        if ref_image is not None:
+            image = image.chunk(2, dim=0)[0]
         image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
 
         # Offload all models

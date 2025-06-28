@@ -131,7 +131,7 @@ class Difix(torch.nn.Module):
         vae.decoder.ignore_skip = False
         
         if mv_unet:
-            raise NotImplementedError("Multi-view UNet is not implemented yet")
+            from mv_unet import UNet2DConditionModel
         else:
             from diffusers import UNet2DConditionModel
 
