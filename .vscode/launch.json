@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["--model_path", "/home/xiaoyun/Code/MyCode/Difix3D/models/20250804/model_20001.pkl",
+            "--input_image", "/data/hdd/Data/GCI/Final/data/test/micro/lr_test_500",
+            "--ref_image", "/data/hdd/Data/GCI/Final/data/test/micro/lr_test_500",
+            "--prompt", "remove degradation",
+            "--output_dir", "/home/xiaoyun/Code/MyCode/Difix3D/outputs/20250804_lr_test_500_as_ref", "--mv_unet"]
+        }
+    ]
+}

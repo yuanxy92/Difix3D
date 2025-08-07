@@ -12,7 +12,10 @@ from peft import LoraConfig
 p = "src/"
 sys.path.append(p)
 from einops import rearrange, repeat
+import torchvision.transforms.functional as F
 
+global nn_
+nn_ = 0
 
 def make_1step_sched():
     noise_scheduler_1step = DDPMScheduler.from_pretrained("stabilityai/sd-turbo", subfolder="scheduler")
@@ -100,6 +103,20 @@ def load_ckpt_from_state_dict(net_difix, optimizer, pretrained_path):
     
     return net_difix, optimizer
 
+def load_ckpt_from_state_dict_noopt(net_difix, pretrained_path):
+    sd = torch.load(pretrained_path, map_location="cpu")
+    
+    if "state_dict_vae" in sd:
+        _sd_vae = net_difix.vae.state_dict()
+        for k in sd["state_dict_vae"]:
+            _sd_vae[k] = sd["state_dict_vae"][k]
+        net_difix.vae.load_state_dict(_sd_vae)
+    _sd_unet = net_difix.unet.state_dict()
+    for k in sd["state_dict_unet"]:
+        _sd_unet[k] = sd["state_dict_unet"][k]
+    net_difix.unet.load_state_dict(_sd_unet)
+    return net_difix
+
 
 def save_ckpt(net_difix, optimizer, outf):
     sd = {}
@@ -139,8 +156,24 @@ class Difix(torch.nn.Module):
 
         if pretrained_path is not None:
             sd = torch.load(pretrained_path, map_location="cpu")
-            vae_lora_config = LoraConfig(r=sd["rank_vae"], init_lora_weights="gaussian", target_modules=sd["vae_lora_target_modules"])
+            vae_lora_config = LoraConfig(r=lora_rank_vae, init_lora_weights="gaussian", target_modules=sd["vae_lora_target_modules"])
             vae.add_adapter(vae_lora_config, adapter_name="vae_skip")
+            self.lora_rank_vae = lora_rank_vae
+            self.target_modules_vae = sd["vae_lora_target_modules"]
+            #################unet lora
+            target_modules_unet = [
+            "to_k", "to_q", "to_v", "to_out.0", "conv", "conv1", "conv2", "conv_shortcut", "conv_out",
+            "proj_in", "proj_out", "ff.net.2", "ff.net.0.proj"
+            ]
+            lora_rank_unet = 16
+            unet_lora_config = LoraConfig(r=lora_rank_unet, init_lora_weights="gaussian",
+                target_modules=target_modules_unet
+            )
+            unet.add_adapter(unet_lora_config)
+            self.lora_rank_unet = lora_rank_unet
+            self.target_modules_vae = target_modules_unet
+            ############################
+
             _sd_vae = vae.state_dict()
             for k in sd["state_dict_vae"]:
                 _sd_vae[k] = sd["state_dict_vae"][k]
@@ -170,12 +203,30 @@ class Difix(torch.nn.Module):
             target_modules_vae = target_modules
             vae.encoder.requires_grad_(False)
 
+            #################unet lora
+            target_modules_unet = [
+            "to_k", "to_q", "to_v", "to_out.0", "conv", "conv1", "conv2", "conv_shortcut", "conv_out",
+            "proj_in", "proj_out", "ff.net.2", "ff.net.0.proj"
+            ]
+            lora_rank_unet = 16
+            unet_lora_config = LoraConfig(r=lora_rank_unet, init_lora_weights="gaussian",
+                target_modules=target_modules_unet
+            )
+            unet.add_adapter(unet_lora_config)
+            ############################
+
+
             vae_lora_config = LoraConfig(r=lora_rank_vae, init_lora_weights="gaussian",
                 target_modules=target_modules_vae)
             vae.add_adapter(vae_lora_config, adapter_name="vae_skip")
                 
             self.lora_rank_vae = lora_rank_vae
             self.target_modules_vae = target_modules_vae
+
+            ##############
+            self.lora_rank_unet = lora_rank_unet
+            self.target_modules_vae = target_modules_unet
+            ##############
 
         # unet.enable_xformers_memory_efficient_attention()
         unet.to("cuda")
@@ -243,7 +294,9 @@ class Difix(torch.nn.Module):
         input_width, input_height = image.size
         new_width = image.width - image.width % 8
         new_height = image.height - image.height % 8
-        image = image.resize((new_width, new_height), Image.LANCZOS)
+        #image = image.resize((new_width, new_height), Image.LANCZOS)
+        image = image.resize((128, 128))
+        image = image.resize((512, 512))
         
         T = transforms.Compose([
             transforms.Resize((height, width), interpolation=Image.LANCZOS),
@@ -258,12 +311,14 @@ class Difix(torch.nn.Module):
         
         output_image = self.forward(x, timesteps, prompt, prompt_tokens)[:, 0]
         output_pil = transforms.ToPILImage()(output_image[0].cpu() * 0.5 + 0.5)
-        output_pil = output_pil.resize((input_width, input_height), Image.LANCZOS)
+        #output_pil = output_pil.resize((input_width, input_height), Image.LANCZOS)
         
         return output_pil
 
     def save_model(self, outf, optimizer):
         sd = {}
+        sd["unet_lora_target_modules"] = self.target_modules_unet
+        sd["rank_unet"] = self.lora_rank_unet
         sd["vae_lora_target_modules"] = self.target_modules_vae
         sd["rank_vae"] = self.lora_rank_vae
         sd["state_dict_unet"] = {k: v for k, v in self.unet.state_dict().items() if "lora" in k or "conv_in" in k}
